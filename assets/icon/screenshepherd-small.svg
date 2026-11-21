@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Screen Shepherd app icon, simplified for 16 to 24 px (tray, small taskbar): flat fills,
+       heavier strokes, no light or shadow, so every edge lands on whole pixels. -->
+  <rect x="0" y="0" width="256" height="256" rx="48" fill="#17261e"/>
+  <rect x="22" y="40" width="96" height="68" rx="12" fill="none" stroke="#9aa89c" stroke-width="20"/>
+  <rect x="138" y="32" width="100" height="80" rx="12" fill="#f4efe1"/>
+  <rect x="78" y="144" width="120" height="92" rx="14" fill="#f4efe1"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M66 74 L116 152" stroke="#17261e" stroke-width="46"/>
+    <path d="M88 160 h34 v-34" stroke="#17261e" stroke-width="46"/>
+    <path d="M66 74 L116 152" stroke="#eab04a" stroke-width="28"/>
+    <path d="M88 160 h34 v-34" stroke="#eab04a" stroke-width="28"/>
+  </g>
+</svg>

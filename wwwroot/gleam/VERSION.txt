@@ -1,0 +1,4 @@
+Gleam 0.9.1
+Installed 2026-11-21T07:39:40.273Z
+Source: Gleam 0.9.1 (scripts/install.mjs)
+Editor: included

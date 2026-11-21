@@ -1,0 +1,34 @@
+# .NET build output
+bin/
+obj/
+publish/
+dist/
+*.dll
+*.exe
+*.pdb
+*.cache
+*.Up2Date
+
+# Smoke and live-move receipts (build.ps1 and manual runs). They record this PC's monitor
+# serial numbers and window titles, so they stay local.
+reports/
+qa-out/
+
+
+# Design working files: decision mocks and review captures stay local; the surface brief,
+# DESIGN.md and .impeccable/design.json are kept.
+.impeccable/mocks/
+.impeccable/review/
+.impeccable/questions/
+.impeccable/build/
+.impeccable/config.local.json
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
+*.user
+*.suo

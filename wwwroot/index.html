@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Screen Shepherd</title>
+  <link rel="stylesheet" href="gleam/gleam-badge.css">
+  <link rel="stylesheet" href="chassis/chassis.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3"/></symbol>
+    <symbol id="i-rescue" viewBox="0 0 16 16"><path d="M3 3l7.5 7.5M10.5 5v5.5H5"/><path d="M8.5 13.5h5v-5"/></symbol>
+    <symbol id="i-here" viewBox="0 0 16 16"><path d="M2 8h8.5M7.5 4.5 11 8l-3.5 3.5"/><path d="M14 3v10"/></symbol>
+    <symbol id="i-window" viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2 6.2h12"/></symbol>
+    <symbol id="i-minimized" viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1.5" stroke-dasharray="2 2"/><path d="M5.5 10h5"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 16 16"><path d="M2 5.5h12M2 10.5h12M5.5 2v12M10.5 2v12"/></symbol>
+    <symbol id="i-power" viewBox="0 0 16 16"><path d="M8 2v5.5"/><path d="M4.6 4.3a5 5 0 1 0 6.8 0"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></symbol>
+    <symbol id="i-close" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M3 10.5V3.8C3 3.3 3.3 3 3.8 3h6.7"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.5c0-.6.4-1 1-1h3.2l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z"/></symbol>
+    <symbol id="i-open" viewBox="0 0 16 16"><path d="M9.5 2.5H13.5v4M13.5 2.5 7.5 8.5"/><path d="M12 9.5V13c0 .3-.2.5-.5.5h-8a.5.5 0 0 1-.5-.5V5c0-.3.2-.5.5-.5H7"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></symbol>
+    <symbol id="i-gather" viewBox="0 0 16 16"><path d="M2.5 2.5l3.5 3.5M13.5 2.5 10 6M2.5 13.5 6 10M13.5 13.5 10 10"/><rect x="6" y="6" width="4" height="4" rx=".8"/></symbol>
+    <symbol id="i-desk" viewBox="0 0 16 16"><rect x="1.5" y="3" width="6" height="5" rx="1"/><rect x="8.5" y="3" width="6" height="5" rx="1"/><path d="M4.5 11.5h7"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 16 16"><path d="M1.5 8.5h3l1.5-4 3 8 1.5-4h4"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 16 16"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></symbol>
+    <symbol id="i-glass" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="2.5"/><path d="M4.5 9.5 9 5M7 11 11 7"/></symbol>
+    <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.5 9.5 9.5 6.5"/><path d="M7.5 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M8.5 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1"/></symbol>
+    <symbol id="i-help" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.3a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.7.6-.7 1.1v.4"/><path d="M8 11.6v.1"/></symbol>
+    <symbol id="i-log" viewBox="0 0 16 16"><path d="M3.5 2.5h6l3 3v8h-9z"/><path d="M6 8h4.5M6 10.5h4.5M9.5 2.5v3h3"/></symbol>
+  </svg>
+
+  <div class="app" id="app">
+    <header class="shell">
+      <div class="brand">
+        <img class="logo" src="icon.svg" alt="" width="34" height="34">
+        <div class="brand-text">
+          <h1>Screen Shepherd</h1>
+          <p>Find where Windows put the window. Put it somewhere less stupid.</p>
+        </div>
+        <!-- Chassis puts the version orb button here; it opens Settings, Dependencies, Help and Diagnostics. -->
+        <span data-chassis-version></span>
+      </div>
+
+      <div class="views" role="tablist" aria-label="Views">
+        <button id="viewDeskTab" role="tab" type="button" aria-selected="true" aria-controls="viewDesk" data-view="desk">Desk</button>
+        <button id="viewHealthTab" role="tab" type="button" aria-selected="false" aria-controls="viewHealth" data-view="health">Health <span id="healthFlag" class="flag-dot" hidden></span></button>
+      </div>
+
+      <div class="shell-actions">
+        <button id="moveActive" class="btn" type="button" title="Move the app you used last to the monitor under the mouse pointer (Ctrl+Alt+Home does the same for the foreground window from anywhere)">
+          <svg class="i"><use href="#i-here"/></svg>Move previous app here</button>
+        <button id="rescueAll" class="btn primary" type="button" title="Drive every stranded window to its nearest display">
+          <svg class="i"><use href="#i-rescue"/></svg><span id="rescueLabel">Rescue stranded</span><span id="rescueCount" class="count num">0</span></button>
+        <button id="refreshState" class="btn icon" type="button" title="Refresh (F5)" aria-label="Refresh"><svg class="i"><use href="#i-refresh"/></svg></button>
+      </div>
+    </header>
+
+    <div class="status" role="status" aria-live="polite">
+      <span><b id="monitorCount" class="num">–</b> monitors</span>
+      <span><b id="windowCount" class="num">–</b> app windows</span>
+      <span id="strayStatus"><b id="strayCount" class="num">–</b> stranded</span>
+      <span>Launch watch <b id="watchStatus">–</b></span>
+      <span>Ctrl+Alt+Home <b id="hotkeyStatus">–</b></span>
+      <span class="stamp">Updated <b id="capturedAt" class="num">–</b></span>
+    </div>
+
+    <main class="views-host">
+      <section id="viewDesk" class="view desk" role="tabpanel" aria-labelledby="viewDeskTab">
+        <div class="field-panel">
+          <div class="maptools glass" role="toolbar" aria-label="Map options">
+            <button type="button" class="tool" id="toolWindows" aria-pressed="true"><svg class="i"><use href="#i-window"/></svg>Windows</button>
+            <button type="button" class="tool" id="toolMinimized" aria-pressed="false" title="Show where minimized windows will restore"><svg class="i"><use href="#i-minimized"/></svg>Minimized</button>
+            <button type="button" class="tool" id="toolGrid" aria-pressed="false" title="Show a 120-pixel grid; dragged windows snap to it"><svg class="i"><use href="#i-grid"/></svg>Grid</button>
+            <span class="tool-sep"></span>
+            <button type="button" class="tool" id="wakeDisplays" title="Ask Windows to wake attached displays. It can't switch a monitor away from another computer's input."><svg class="i"><use href="#i-power"/></svg>Wake displays</button>
+          </div>
+          <div id="field" class="field" aria-label="Desk map: monitors and windows drawn to scale" role="img"></div>
+          <div id="dragReadout" class="drag-readout glass num" hidden></div>
+          <div class="legend" aria-hidden="true">
+            <span><i class="lg-window"></i>Window</span>
+            <span><i class="lg-partial"></i>Partly off a display</span>
+            <span><i class="lg-stray"></i>Stranded</span>
+            <span><i class="lg-drive"></i>Drive line home</span>
+          </div>
+        </div>
+
+        <aside class="flock" aria-label="Windows by monitor">
+          <div class="flock-search">
+            <label class="search">
+              <svg class="i"><use href="#i-search"/></svg>
+              <input id="windowFilter" type="search" autocomplete="off" spellcheck="false" placeholder="Filter by app, title or monitor  ( / )" aria-label="Filter windows">
+            </label>
+          </div>
+          <div id="flockBody" class="flock-body"></div>
+          <div class="gather">
+            <div><b>Display still on, panel dark?</b><span>Gather moves every app window that isn't minimized to one display. Click twice to confirm.</span></div>
+            <div class="gather-row">
+              <select id="gatherTarget" aria-label="Gather to display"></select>
+              <button id="gatherAll" class="btn danger" type="button"><svg class="i"><use href="#i-gather"/></svg>Gather all</button>
+            </div>
+          </div>
+        </aside>
+
+        <footer id="verdicts" class="verdicts" aria-label="Health at a glance"></footer>
+      </section>
+
+      <section id="viewHealth" class="view health" role="tabpanel" aria-labelledby="viewHealthTab" hidden>
+        <div class="health-scroll">
+          <div class="health-head">
+            <div>
+              <h2>Monitor and graphics health</h2>
+              <p>Read-only evidence from Windows display paths, EDID, Plug and Play, installed drivers, the System event log and each monitor's advertised modes. It doesn't test panels, temperatures or cables.</p>
+            </div>
+          </div>
+          <div class="health-grid">
+            <section class="health-col" aria-labelledby="monitorsHeading">
+              <h3 id="monitorsHeading">Monitors</h3>
+              <div id="monitorCards"></div>
+            </section>
+            <section class="health-col" aria-labelledby="graphicsHeading">
+              <h3 id="graphicsHeading">Graphics</h3>
+              <div id="adapterCards"></div>
+              <h3>Windows performance checks <span id="tuningVerdict" class="pill"></span></h3>
+              <p class="note" id="tuningHost"></p>
+              <ol id="tuningList" class="checks"></ol>
+              <h3>Browser load</h3>
+              <p class="note">Memory is exact per browser. Tabs are counted only when the browser exposes its tab strip to Windows UI Automation; per-tab memory isn't guessed.</p>
+              <ul id="browserList" class="browsers"></ul>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="selectionChip" class="chip glass" hidden></div>
+
+    <div id="toast" class="toast glass" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="gleam/gleam-badge.js"></script>
+  <script src="chassis/chassis.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

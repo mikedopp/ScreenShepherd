@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- WPF: the Chassis window, and UIAutomationClient (browser tab strips). -->
+    <UseWPF>true</UseWPF>
+    <!-- Windows Forms: the tray icon, Screen, and the live move test's windows. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <StartupObject>ScreenShepherd.Program</StartupObject>
+    <AssemblyName>ScreenShepherd</AssemblyName>
+    <RootNamespace>ScreenShepherd</RootNamespace>
+    <Description>Monitor-aware Windows application inventory and off-screen window rescue utility.</Description>
+    <!-- The one place the version lives is the VERSION file. The exe, the window, the tray menu, the smoke receipt
+         and build.ps1's dist folder name all read it from the build. -->
+    <AppVersion>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\VERSION').Trim())</AppVersion>
+    <Version>$(AppVersion)</Version>
+    <InformationalVersion>$(AppVersion)</InformationalVersion>
+    <!-- Keep the git hash out of ProductVersion so the file version matches what the app shows. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Authors>mikedopp</Authors>
+    <Company>mikedopp</Company>
+    <Product>Screen Shepherd</Product>
+    <Copyright>Copyright (c) 2026 mikedopp</Copyright>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>ScreenShepherd.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
+    <AllowedReferenceRelatedFileExtensions>.pdb</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The window is WPF (Chassis), so Windows Forms names are asked for by file, not everywhere:
+         Application, MessageBox and Clipboard exist in both. -->
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+    <PackageReference Include="System.Management" Version="10.0.15" />
+  </ItemGroup>
+
+  <!-- The WebView2 package also brings its Windows Forms control; this app hosts the WPF one. -->
+  <Target Name="RemoveWebView2WinFormsReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.WinForms'" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Include="ScreenShepherd.ico" LogicalName="ScreenShepherd.ico" />
+    <!-- Chassis C# kit stamp, shown on the Dependencies and Diagnostics tabs -->
+    <EmbeddedResource Include="Chassis\SOURCE.txt" LogicalName="Chassis.SOURCE.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="wwwroot\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <None Remove="dist\**;reports\**;qa-out\**" />
+    <Compile Remove="dist\**;reports\**;qa-out\**" />
+  </ItemGroup>
+</Project>
