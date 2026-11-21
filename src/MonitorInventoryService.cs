@@ -272,7 +272,8 @@ internal sealed class MonitorInventoryService
             : string.Empty;
     }
 
-    private static string FormatConnection(uint technology) => technology switch
+    // DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY (wingdi.h). 7 is unused; 0xFFFFFFFF is OTHER.
+    internal static string FormatConnection(uint technology) => technology switch
     {
         0 => "VGA",
         1 => "S-Video",
@@ -287,10 +288,12 @@ internal sealed class MonitorInventoryService
         11 => "Embedded DisplayPort",
         12 => "UDI",
         13 => "Embedded UDI",
-        14 => "Miracast",
-        15 => "Indirect wired",
-        16 => "Indirect virtual",
-        17 => "USB4",
+        14 => "SDTV dongle",
+        15 => "Miracast",
+        16 => "USB or indirect display",
+        17 => "Virtual display",
+        18 => "DisplayPort over USB-C",
+        0xFFFFFFFF => "Other connector",
         0x80000000 => "Internal panel",
         _ => $"Connector {technology}"
     };

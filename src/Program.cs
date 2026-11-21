@@ -109,6 +109,10 @@ internal static class AppChecks
         c.That(plain is { Redact: false, SampleStray: false } && plain.Hidden.Count == 0, "a plain snapshot shows the real state");
         c.That(shared is { Redact: true, SampleStray: true } && shared.Hidden.SequenceEqual(new[] { "alpha", "beta" }), "hiding a process also redacts titles and serials");
         c.That(SnapshotOptions.From(null, "redact=1&stray=1") is { Redact: false, SampleStray: false }, "the made-up stray and redaction exist only in snapshot runs");
+        c.That(MonitorInventoryService.FormatConnection(15) == "Miracast" && MonitorInventoryService.FormatConnection(14) == "SDTV dongle"
+               && MonitorInventoryService.FormatConnection(16) == "USB or indirect display" && MonitorInventoryService.FormatConnection(17) == "Virtual display"
+               && MonitorInventoryService.FormatConnection(18) == "DisplayPort over USB-C" && MonitorInventoryService.FormatConnection(5) == "HDMI",
+               "connector types use Windows' numbering (15 is Miracast)");
         c.That(WindowsParts.ForChassis().Count == 12, "every Windows part the app reads is on the Dependencies tab");
     }
 }

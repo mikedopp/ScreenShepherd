@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1 — 2026-11-21
+
+### Fixed
+- **Connection types from Windows' number 14 on were one off.** A Miracast display showed as "Indirect wired", an SDTV dongle as "Miracast", a USB or DisplayLink display as "Indirect virtual", a virtual display as "USB4", and DisplayPort over USB-C as "Connector 18". They now read Miracast, SDTV dongle, USB or indirect display, Virtual display and DisplayPort over USB-C. The self-test checks the numbering.
+
 ## 1.7.0 — 2026-11-21
 
 Screen Shepherd now runs on Chassis, the shared app shell, instead of its own window, tray, single-instance and pop-out code. What the app does (the desk map, moves, rescues, Health) is unchanged.
