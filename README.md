@@ -11,10 +11,10 @@
 
 Unplug a monitor, undock a laptop or power off a screen, and Windows can leave apps on a display that is no longer there. Screen Shepherd is a small Windows tray app that shows where every app window really is, monitor by monitor, and moves the stranded ones back where you can reach them: by drag, by button, by hotkey, or on its own when the displays change.
 
-It also reads each monitor's identity and connection, grades monitor and graphics-adapter health from what Windows reports, and lists read-only performance checks for the PC it runs on.
+It keeps track of displays that come and go (wireless displays, wireless HDMI kits, docks, monitors that sleep) and puts their windows back when they return. It also reads each monitor's identity, connection, bandwidth, HDR, variable refresh and colour gamut from its EDID, reads its own settings over DDC/CI where it answers, grades monitor and graphics-adapter health from what Windows reports, and lists read-only performance checks for the PC it runs on.
 
 - **Local only.** No network connections, screenshots, window contents, keystrokes or credentials.
-- **Changes nothing on its own** except window positions. Health and performance checks only read; settings pages open for you to decide.
+- **Changes nothing on its own** except window positions. Health and performance checks only read; settings pages open for you to decide. A monitor's brightness, contrast or input changes only after you turn on **Allow changes** for that monitor.
 - **Free and open source** under the MIT license.
 
 ## Requirements
@@ -85,6 +85,11 @@ Captured from the real app with `ScreenShepherd.exe --snapshot <file.png> --quer
 - Moves the foreground window to the monitor under the mouse with `Ctrl+Alt+Home`.
 - Provides a guarded **Gather all windows** action for monitors that remain logically active after the physical panel is powered off.
 - Preserves minimized/maximized state while moving a window: a minimized window stays minimized and restores onto the target; a maximized window ends up maximized on the target.
+- Keeps its own watch of displays that come and go. A display that goes away stays on the map as a dashed outline holding the spots its windows go back to; when it returns, they go back where they were, unless you moved them in the meantime.
+- Keeps a 24-hour drop history per display (kept 30 days on this PC): when it went, how long it had been on, and how long the gap was. A gap under 10 minutes (changeable) counts as a drop.
+- Marks Miracast displays as wireless, opens Windows' Connect pane (Win+K) from the map, and lets you name any display and mark it as a wireless HDMI kit or dock, saved against its EDID identity.
+- Reads the full EDID, extension blocks included: the pixel clock in use against the monitor's limit, HDR transfer functions and brightness, the variable refresh range, and how much of DCI-P3 and sRGB the panel covers.
+- Reads each monitor's brightness, contrast, input, colour preset, power mode and hours-on count over DDC/CI, at most once a minute and off the window's thread. Changes are off per monitor until you allow them; switching input asks twice.
 
 No screenshots, window contents, keystrokes, credentials, or remote endpoints are used.
 
@@ -149,8 +154,10 @@ The live move test (`ScreenShepherd.exe --integration-test --receipt <file>`) cr
 ## Boundaries
 
 - If a powered-off monitor still advertises itself over HDMI or DisplayPort, Windows reports it as active. Use the guarded gather action.
-- **Wake display signal** asks Windows to power attached display paths on. It cannot force a physical monitor to leave another computer’s selected input; that requires the panel’s input controls or validated DDC/CI support.
-- **Healthy** does not diagnose panel electronics. Backlight, pixel, temperature, cable signal quality, and physical power are outside the Windows topology/EDID evidence used here.
+- **Wake display signal** asks Windows to power attached display paths on. It cannot force a physical monitor to leave another computer’s selected input; the Health card's DDC/CI input switch can, on a monitor that answers DDC/CI and that you allowed.
+- **Healthy** does not diagnose panel electronics. Backlight, pixel, cable signal quality, and physical power are outside the Windows topology/EDID evidence used here.
+- **Heat is never measured.** No monitor, TV, projector or wireless adapter reports its temperature to Windows. When drops keep coming after about the same time on, the Health card says so, since that pattern often means a hot adapter or a power-saving timer.
+- Bandwidth, HDR, variable refresh and gamut are what the EDID advertises, not measurements. Wireless links, kits, docks, TVs and most projectors don't answer DDC/CI. Windows' own Miracast log is not read (it is off by default and needs admin).
 - Advanced color means the active Windows path reports advanced-color support. It is not labeled HDR because Windows can distinguish SDR wide-color and HDR modes.
 - GPU health does not replace a temperature or stress test. Screen Shepherd checks loaded/PnP state and recent recovered resets, not thermal stability or failing VRAM under load.
 - Driver age is a review signal, not proof that a driver package is obsolete. On a Surface, the Surface app and Windows Update remain the first update path; elsewhere the GPU vendor's tool is suggested, with the current package kept for rollback.

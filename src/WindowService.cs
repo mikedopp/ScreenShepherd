@@ -58,7 +58,15 @@ public sealed class WindowService
                     Health: details?.Health ?? "Review",
                     HealthLevel: details?.HealthLevel ?? "warn",
                     HealthReasons: healthReasons,
-                    MultipleActivePaths: details?.MultipleActivePaths ?? false);
+                    MultipleActivePaths: details?.MultipleActivePaths ?? false)
+                {
+                    IdentityKey = details?.IdentityKey ?? string.Empty,
+                    OutputTechnology = details?.OutputTechnology ?? 0,
+                    Wireless = details?.OutputTechnology == MonitorInventoryService.MiracastTechnology,
+                    Edid = details?.Edid ?? EdidDetails.Empty,
+                    Signal = details?.Signal,
+                    SdrWhiteNits = details?.SdrWhiteNits ?? 0
+                };
             })
             .ToArray();
     }
@@ -490,7 +498,24 @@ public sealed record MonitorSnapshot(
     string Health,
     string HealthLevel,
     IReadOnlyList<string> HealthReasons,
-    bool MultipleActivePaths);
+    bool MultipleActivePaths)
+{
+    // 1.8: the full EDID, the signal, and (filled in by AppHostService) how the user named it, what kind it is, its
+    // session, and its own settings over DDC/CI.
+    public string IdentityKey { get; init; } = string.Empty;
+    public uint OutputTechnology { get; init; }
+    public bool Wireless { get; init; }
+    public EdidDetails Edid { get; init; } = EdidDetails.Empty;
+    public SignalInfo? Signal { get; init; }
+    public double SdrWhiteNits { get; init; }
+    public string Key { get; init; } = string.Empty;
+    public string Label { get; init; } = string.Empty;
+    public string Kind { get; init; } = "wired";
+    public DateTimeOffset? OnSince { get; init; }
+    public int DropsToday { get; init; }
+    public DdcReading? Ddc { get; init; }
+    public bool DdcAllowed { get; init; }
+}
 
 public sealed record WindowSnapshot(
     string Handle,

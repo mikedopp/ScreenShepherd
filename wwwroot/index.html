@@ -32,6 +32,10 @@
     <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.5 9.5 9.5 6.5"/><path d="M7.5 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M8.5 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1"/></symbol>
     <symbol id="i-help" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.3a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.7.6-.7 1.1v.4"/><path d="M8 11.6v.1"/></symbol>
     <symbol id="i-log" viewBox="0 0 16 16"><path d="M3.5 2.5h6l3 3v8h-9z"/><path d="M6 8h4.5M6 10.5h4.5M9.5 2.5v3h3"/></symbol>
+    <symbol id="i-cast" viewBox="0 0 16 16"><path d="M2 5V3.8c0-.5.3-.8.8-.8h10.4c.5 0 .8.3.8.8v8.4c0 .5-.3.8-.8.8H9.5"/><path d="M2 8a6 6 0 0 1 5 5M2 10.5A3.5 3.5 0 0 1 4.5 13"/><path d="M2 13h.01"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 16 16"><path d="M2 6.5a8.5 8.5 0 0 1 12 0M4.3 9a5.3 5.3 0 0 1 7.4 0M6.6 11.4a2 2 0 0 1 2.8 0"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.5 3 13 5.5 6 12.5H3.5V10z"/></symbol>
+    <symbol id="i-return" viewBox="0 0 16 16"><path d="M13 4v3.5c0 .8-.7 1.5-1.5 1.5H4"/><path d="M6.5 6 3.5 9l3 3"/></symbol>
   </svg>
 
   <div class="app" id="app">
@@ -64,6 +68,8 @@
       <span><b id="monitorCount" class="num">–</b> monitors</span>
       <span><b id="windowCount" class="num">–</b> app windows</span>
       <span id="strayStatus"><b id="strayCount" class="num">–</b> stranded</span>
+      <span id="wirelessStatus" hidden>Wireless <b id="wirelessCount">–</b></span>
+      <span id="dropStatus" hidden>Drops in 24 h <b id="dropCount" class="num">–</b></span>
       <span>Launch watch <b id="watchStatus">–</b></span>
       <span>Ctrl+Alt+Home <b id="hotkeyStatus">–</b></span>
       <span class="stamp">Updated <b id="capturedAt" class="num">–</b></span>
@@ -78,14 +84,17 @@
             <button type="button" class="tool" id="toolGrid" aria-pressed="false" title="Show a 120-pixel grid; dragged windows snap to it"><svg class="i"><use href="#i-grid"/></svg>Grid</button>
             <span class="tool-sep"></span>
             <button type="button" class="tool" id="wakeDisplays" title="Ask Windows to wake attached displays. It can't switch a monitor away from another computer's input."><svg class="i"><use href="#i-power"/></svg>Wake displays</button>
+            <button type="button" class="tool" id="connectDisplay" title="Opens Windows' Connect pane (Win+K) to cast to a wireless display or TV"><svg class="i"><use href="#i-cast"/></svg>Connect</button>
           </div>
           <div id="field" class="field" aria-label="Desk map: monitors and windows drawn to scale" role="img"></div>
           <div id="dragReadout" class="drag-readout glass num" hidden></div>
+          <div id="notice" class="notice glass" role="status" aria-live="polite" hidden></div>
           <div class="legend" aria-hidden="true">
             <span><i class="lg-window"></i>Window</span>
             <span><i class="lg-partial"></i>Partly off a display</span>
             <span><i class="lg-stray"></i>Stranded</span>
             <span><i class="lg-drive"></i>Drive line home</span>
+            <span id="legendAway" hidden><i class="lg-away"></i>Display away</span>
           </div>
         </div>
 
@@ -114,7 +123,7 @@
           <div class="health-head">
             <div>
               <h2>Monitor and graphics health</h2>
-              <p>Read-only evidence from Windows display paths, EDID, Plug and Play, installed drivers, the System event log and each monitor's advertised modes. It doesn't test panels, temperatures or cables.</p>
+              <p>Evidence from Windows display paths, the full EDID (with its extension blocks), Plug and Play, installed drivers, the System event log, each monitor's advertised modes, and the monitor's own settings over DDC/CI where it answers. It doesn't test panels or cables, and no display reports its temperature.</p>
             </div>
           </div>
           <div class="health-grid">
@@ -123,6 +132,7 @@
               <div id="monitorCards"></div>
             </section>
             <section class="health-col" aria-labelledby="graphicsHeading">
+              <div id="displayHistory"></div>
               <h3 id="graphicsHeading">Graphics</h3>
               <div id="adapterCards"></div>
               <h3>Windows performance checks <span id="tuningVerdict" class="pill"></span></h3>
@@ -140,6 +150,7 @@
     <div id="selectionChip" class="chip glass" hidden></div>
 
     <div id="toast" class="toast glass" role="status" aria-live="polite"></div>
+    <div id="overlay"></div>
   </div>
 
   <script src="gleam/gleam-badge.js"></script>

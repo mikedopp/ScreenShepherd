@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.8.0 — 2026-11-21
+
+Wireless displays, displays that come and go, and full monitor diagnostics.
+
+### Added
+- **Displays that come and go.** Screen Shepherd keeps its own watch of which displays are on. When one goes away (a Miracast display, a wireless HDMI kit, a dock, a monitor that sleeps), the map keeps it as a dashed **away pen** at its old place, with the spots its windows go back to, and a notice with **Connect** (for Miracast) and **Keep them where they are**. When it returns, its windows **go back where they were**, with drive lines on the map and a notification. A window you moved in the meantime stays where you put it.
+- **Drop history** (Health, right column): a 24-hour strip per display with each drop marked, and the events newest first (when, how long it had been on, how many windows went back). A gap under 10 minutes counts as a drop; longer counts as turned off. Kept 30 days in `history.json`; **Copy history** puts it on the clipboard.
+- **Wireless** sign on Miracast pens, a **Connect** button in the map toolbar (Windows' Connect pane, Win+K), and Wireless and Drops counts in the status bar when there is something to count.
+- **Name a display** with the pencil on its Health card, and mark what it is (wired, wireless HDMI kit, dock or USB adapter). Saved against the panel's EDID identity in `displays.json`, so the name follows it to another port.
+- **Health cards in groups:** Link (connection, the last 24 hours, session, drops), Picture, Panel and Monitor settings.
+  - **Bandwidth:** the pixel clock Windows is sending against the EDID's limit (range limits, or the HDMI TMDS limit), as a share in use.
+  - **HDR:** HDR10 and HLG from the EDID's HDR block, peak, full-frame and black levels, and the SDR white level when HDR is on.
+  - **Variable refresh:** HDMI VRR range, FreeSync block, or the EDID's refresh range.
+  - **Colour:** how much of DCI-P3 and sRGB the panel's primaries cover.
+  - **Heat:** always "Not reported", because no monitor, TV or adapter tells Windows its temperature. When drops keep coming after about the same time on, the card says so: that pattern often means a hot adapter or a power-saving timer.
+  - The full EDID is read, with extension blocks from WMI when the registry copy is short.
+- **Monitor settings over DDC/CI:** brightness, contrast, input, colour preset, power mode, the monitor's own hours-on count and MCCS version, read in the background at most once a minute. Changes are off until you turn on **Allow changes** for that monitor; switching input asks twice. Wireless links, kits, docks, TVs and most projectors don't answer, and the card says so.
+- Settings: **Put windows back when a display returns**, **Wait before putting back**, **Tell me when a display drops**, the drop gap, how long to remember an away display's layout, and **Read monitor settings (DDC/CI)**.
+- Self-test: a synthetic EDID (range limits, HDMI block, HDR block, sRGB primaries), gamut coverage, the DDC/CI input list, durations, and a display that drops and returns (parked, put back, recorded as a drop, history round-trips).
+
+### Changed
+- WebView2 SDK 1.0.4370.26 (was 1.0.4314.35).
+- README: what 1.8 adds, and what it can't know (heat, DDC/CI on wireless links).
+
+### Fixed
+- The fence line on the map no longer runs through a display's name and mode; the labels sit higher.
+- Includes 1.7.1's fix: connection types from Windows' number 14 on (Miracast, SDTV dongle, USB, virtual, DisplayPort over USB-C) were one off.
+
+### Not in this release
+- Windows' own Miracast log (connection reasons for wireless drops) is not read. It is off by default, needs admin to turn on, and can't be read live reliably; Screen Shepherd's own watch records the drops instead.
 ## 1.7.1 — 2026-11-21
 
 ### Fixed

@@ -11,16 +11,34 @@ namespace ScreenShepherd;
 public sealed record AppSettings(
     bool AutoRescueNewWindows = true,
     bool AutoRescueDisplayChanges = true,
-    bool StartMinimized = false)
+    bool StartMinimized = false,
+    bool PutBack = true,
+    int PutBackDelaySeconds = 3,
+    bool NotifyDrops = true,
+    int DropGapMinutes = 10,
+    int LayoutDays = 7,
+    bool ReadDdc = true)
 {
     public const string NewWindowsKey = "autoRescueNewWindows";
     public const string DisplayChangesKey = "autoRescueDisplayChanges";
     public const string StartMinimizedKey = "startMinimized";
+    public const string PutBackKey = "putBack";
+    public const string PutBackDelayKey = "putBackDelaySeconds";
+    public const string NotifyDropsKey = "notifyDrops";
+    public const string DropGapKey = "dropGapMinutes";
+    public const string LayoutDaysKey = "layoutDays";
+    public const string ReadDdcKey = "readDdc";
 
     public static AppSettings From(ChassisSettings settings) => new(
         settings.Get(NewWindowsKey, true),
         settings.Get(DisplayChangesKey, true),
-        settings.Get(StartMinimizedKey, false));
+        settings.Get(StartMinimizedKey, false),
+        settings.Get(PutBackKey, true),
+        Math.Clamp(settings.Get(PutBackDelayKey, 3), 0, 30),
+        settings.Get(NotifyDropsKey, true),
+        Math.Clamp(settings.Get(DropGapKey, 10), 1, 120),
+        Math.Clamp(settings.Get(LayoutDaysKey, 7), 1, 90),
+        settings.Get(ReadDdcKey, true));
 }
 
 /// <summary>

@@ -1,3 +1,4 @@
+using System.Management;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
@@ -10,6 +11,8 @@ internal sealed class MonitorInventoryService
     private const uint GetTargetName = 2;
     private const uint GetTargetPreferredMode = 3;
     private const uint GetAdvancedColorInfo = 9;
+    private const uint GetSdrWhiteLevel = 11;
+    internal const uint MiracastTechnology = 15;
 
     private static readonly IReadOnlyDictionary<string, string> ManufacturerNames =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -69,8 +72,11 @@ internal sealed class MonitorInventoryService
                 var targetName = GetTargetDeviceName(path.TargetInfo);
                 var preferredMode = GetPreferredMode(path.TargetInfo);
                 var advancedColor = GetAdvancedColor(path.TargetInfo);
-                var edid = ReadEdid(targetName.MonitorDevicePath);
+                var edid = ReadFullEdid(targetName.MonitorDevicePath, out var edidSource);
                 var parsed = ParseEdid(edid);
+                var edidDetails = EdidDetails.Parse(edid, edidSource);
+                var signal = path.TargetInfo.ModeInfoIdx < actualModeCount ? ReadSignal(modes[path.TargetInfo.ModeInfoIdx]) : null;
+                var sdrWhite = advancedColor.Enabled ? GetSdrWhiteNits(path.TargetInfo) : 0;
                 var manufacturerCode = parsed.ManufacturerCode;
                 if (string.IsNullOrWhiteSpace(manufacturerCode) && targetName.EdidIdsValid)
                     manufacturerCode = DecodeManufacturer(targetName.EdidManufactureId);
@@ -119,7 +125,14 @@ internal sealed class MonitorInventoryService
                     Health: reasons.Count == 0 ? "Healthy" : "Review",
                     HealthLevel: reasons.Count == 0 ? "ok" : "warn",
                     HealthReasons: reasons,
-                    IdentityKey: BuildIdentityKey(manufacturerCode, parsed.ProductCode, parsed.SerialNumber));
+                    IdentityKey: BuildIdentityKey(manufacturerCode, parsed.ProductCode, parsed.SerialNumber))
+                {
+                    OutputTechnology = path.TargetInfo.OutputTechnology,
+                    DevicePath = targetName.MonitorDevicePath ?? string.Empty,
+                    Edid = edidDetails,
+                    Signal = signal,
+                    SdrWhiteNits = sdrWhite
+                };
             }
 
             MarkDuplicateActivePaths(telemetry);
@@ -200,6 +213,85 @@ internal sealed class MonitorInventoryService
 
     private static DisplayConfigDeviceInfoHeader CreateHeader(uint type, int size, Luid adapterId, uint id) =>
         new() { Type = type, Size = (uint)size, AdapterId = adapterId, Id = id };
+
+    private static SignalInfo? ReadSignal(DisplayConfigModeInfo mode)
+    {
+        if (mode.InfoType != 2 || mode.PixelRate == 0) return null;
+        var hsync = mode.HSyncDenominator == 0 ? 0 : (double)mode.HSyncNumerator / mode.HSyncDenominator / 1000;
+        return new SignalInfo(Math.Round(mode.PixelRate / 1_000_000.0, 2), Math.Round(hsync, 2), mode.TotalWidth, mode.TotalHeight);
+    }
+
+    // Windows' SDR content brightness for an HDR display, in nits (the value is in units of 80/1000 nits).
+    private static double GetSdrWhiteNits(DisplayConfigPathTargetInfo target)
+    {
+        var request = new DisplayConfigSdrWhiteLevel
+        {
+            Header = CreateHeader(GetSdrWhiteLevel, Marshal.SizeOf<DisplayConfigSdrWhiteLevel>(), target.AdapterId, target.Id)
+        };
+        return DisplayConfigGetDeviceInfo(ref request) == 0 ? Math.Round(request.SdrWhiteLevel * 80.0 / 1000) : 0;
+    }
+
+    // The registry often keeps only the 128-byte base block. When the base block says there are extension blocks the
+    // registry lacks, they come from WMI (root\wmi WmiMonitorDescriptorMethods, readable without admin). Cached: EDIDs
+    // don't change while a monitor stays on the same path, and the WMI read is slow.
+    private static readonly object EdidGate = new();
+    private static readonly Dictionary<string, (DateTime At, byte[]? Edid, string Source)> EdidCache = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static byte[]? ReadFullEdid(string? monitorDevicePath, out string source)
+    {
+        source = "none";
+        if (string.IsNullOrWhiteSpace(monitorDevicePath)) return null;
+        lock (EdidGate)
+        {
+            if (EdidCache.TryGetValue(monitorDevicePath, out var cached) && DateTime.UtcNow - cached.At < TimeSpan.FromMinutes(10))
+            {
+                source = cached.Source;
+                return cached.Edid;
+            }
+        }
+        var edid = ReadEdid(monitorDevicePath);
+        source = edid is null ? "none" : "registry";
+        if (edid is { Length: >= 128 } && edid[126] > 0 && edid.Length < 128 * (1 + edid[126]))
+        {
+            var extended = ReadWmiExtensions(monitorDevicePath, edid);
+            if (extended is not null) { edid = extended; source = "registry + WMI"; }
+        }
+        lock (EdidGate) EdidCache[monitorDevicePath] = (DateTime.UtcNow, edid, source);
+        return edid;
+    }
+
+    private static byte[]? ReadWmiExtensions(string monitorDevicePath, byte[] baseBlock)
+    {
+        var parts = monitorDevicePath.Split('#');
+        if (parts.Length < 3) return null;
+        var prefix = $@"DISPLAY\{parts[1]}\{parts[2]}_";
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(@"root\wmi", "SELECT InstanceName FROM WmiMonitorDescriptorMethods");
+            foreach (ManagementObject item in searcher.Get())
+            {
+                using (item)
+                {
+                    if (item["InstanceName"] is not string name || !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    var all = new List<byte>(baseBlock.AsSpan(0, 128).ToArray());
+                    for (var block = 1; block <= Math.Min((int)baseBlock[126], 7); block++)
+                    {
+                        using var input = item.GetMethodParameters("WmiGetMonitorRawEEdidV1Block");
+                        input["BlockId"] = (byte)block;
+                        using var output = item.InvokeMethod("WmiGetMonitorRawEEdidV1Block", input, null);
+                        if (output?["BlockContent"] is not byte[] content || content.Length < 128) break;
+                        all.AddRange(content.AsSpan(0, 128).ToArray());
+                    }
+                    return all.Count > 128 ? all.ToArray() : null;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException or COMException or InvalidCastException)
+        {
+            // The base block from the registry still gives identity, size and range limits.
+        }
+        return null;
+    }
 
     private static byte[]? ReadEdid(string? monitorDevicePath)
     {
@@ -325,6 +417,16 @@ internal sealed class MonitorInventoryService
     [DllImport("user32.dll")]
     private static extern int DisplayConfigGetDeviceInfo(ref DisplayConfigGetAdvancedColorInfo requestPacket);
 
+    [DllImport("user32.dll")]
+    private static extern int DisplayConfigGetDeviceInfo(ref DisplayConfigSdrWhiteLevel requestPacket);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigSdrWhiteLevel
+    {
+        public DisplayConfigDeviceInfoHeader Header;
+        public uint SdrWhiteLevel;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct Luid
     {
@@ -371,8 +473,18 @@ internal sealed class MonitorInventoryService
         public uint Flags;
     }
 
+    // DISPLAYCONFIG_MODE_INFO: infoType, id, adapterId, then a 48-byte union. For a target mode (infoType 2) the union
+    // is DISPLAYCONFIG_VIDEO_SIGNAL_INFO: pixelRate, hSyncFreq, vSyncFreq, activeSize, totalSize, videoStandard, scanline.
     [StructLayout(LayoutKind.Explicit, Size = 64)]
-    private struct DisplayConfigModeInfo { }
+    private struct DisplayConfigModeInfo
+    {
+        [FieldOffset(0)] public uint InfoType;
+        [FieldOffset(16)] public ulong PixelRate;
+        [FieldOffset(24)] public uint HSyncNumerator;
+        [FieldOffset(28)] public uint HSyncDenominator;
+        [FieldOffset(48)] public uint TotalWidth;
+        [FieldOffset(52)] public uint TotalHeight;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct DisplayConfigDeviceInfoHeader
@@ -493,4 +605,11 @@ internal sealed record MonitorTelemetry(
     string HealthLevel,
     IReadOnlyList<string> HealthReasons,
     string IdentityKey,
-    bool MultipleActivePaths = false);
+    bool MultipleActivePaths = false)
+{
+    public uint OutputTechnology { get; init; }
+    public string DevicePath { get; init; } = string.Empty;
+    public EdidDetails Edid { get; init; } = EdidDetails.Empty;
+    public SignalInfo? Signal { get; init; }
+    public double SdrWhiteNits { get; init; }
+}

@@ -23,6 +23,8 @@ public sealed class MainWindow : ChassisWindow
     private nint _winEventHook;
     private nint _foregroundHook;
     private int _pushingState;
+    private int _checkingDisplays;
+    private System.Threading.Timer? _displayTimer;
     private bool _closing;
 
     public MainWindow()
@@ -30,6 +32,8 @@ public sealed class MainWindow : ChassisWindow
         _winEventCallback = OnWindowEvent;
         _shot = SnapshotOptions.From(Launch.Snapshot, Launch.Query);
         _service.UseSettings(AppSettings.From(Settings));
+        // Display names and history live beside settings.json; a snapshot run reads them and changes nothing.
+        _service.StartWatch(ChassisPaths.Folder, readOnly: IsSnapshot);
         if (Program.ImportedLegacySettings) _service.Log("ok", "Settings from Screen Shepherd 1.6 were copied over.");
 
         Title = "Screen Shepherd";
@@ -51,6 +55,9 @@ public sealed class MainWindow : ChassisWindow
         IsVisibleChanged += (_, _) => { if (IsVisible && PageReady) _ = PushStateAsync(); };
         _refreshTimer.Tick += async (_, _) => { if (IsVisible && PageReady) await PushStateAsync(); };
         _refreshTimer.Start();
+        // Every 3 seconds, visible or not: where windows are, and whether a display came or went. (A snapshot run
+        // returned above, so it only reads the saved history and never puts a window back.)
+        _displayTimer = new System.Threading.Timer(_ => CheckDisplays(false), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3));
     }
 
     // ---------- Chassis hooks ----------
@@ -101,6 +108,8 @@ public sealed class MainWindow : ChassisWindow
     {
         _closing = true;
         _refreshTimer.Stop();
+        _displayTimer?.Dispose();
+        _service.StopWatch();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         if (_handle != 0 && !IsSnapshot) NativeMethods.UnregisterHotKey(_handle, RescueHotkeyId);
         if (_winEventHook != 0) NativeMethods.UnhookWinEvent(_winEventHook);
@@ -179,6 +188,7 @@ public sealed class MainWindow : ChassisWindow
             {
                 var result = await Task.Run(_service.HandleDisplayTopologyChange);
                 if (result.Moved > 0) Notify("Display changed", result.Message);
+                await Task.Run(() => CheckDisplays(false));
             }
             catch (Exception ex)
             {
@@ -187,6 +197,46 @@ public sealed class MainWindow : ChassisWindow
             if (PageReady) await PushStateAsync();
         }));
     }
+
+    // Runs on a pool thread. One check at a time; a put-back can wait a few seconds for the display to settle.
+    private void CheckDisplays(bool force)
+    {
+        if (_closing || Interlocked.Exchange(ref _checkingDisplays, 1) == 1) return;
+        try
+        {
+            var check = _service.CheckDisplays(force);
+            if (check.Gone.Count == 0 && check.Back.Count == 0) return;
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                var settings = _service.Settings;
+                foreach (var gone in check.Gone.Where(_ => settings.NotifyDrops))
+                    Notify($"{gone.Name} went away", $"After {DisplayWatch.Span(gone.Minutes)} on."
+                        + (gone.Windows > 0 && settings.PutBack ? $" Its {Plural(gone.Windows, "window")} go back when it returns." : string.Empty), true);
+                foreach (var back in check.Back)
+                {
+                    var done = check.PutBack.FirstOrDefault(p => p.Key == back.Key);
+                    var text = (back.GapMinutes is { } gap ? $"Back after {DisplayWatch.Span(gap)}." : "Turned on.")
+                        + (done is { Moved: > 0 } ? $" Put {Plural(done.Moved, "window")} back." : string.Empty);
+                    if (settings.NotifyDrops || done is { Moved: > 0 }) Notify($"{back.Name} is back", text);
+                }
+                if (PageReady)
+                {
+                    Post(new { type = "displays", gone = check.Gone, back = check.Back.Select(b => new { b.Key, b.Name, b.GapMinutes }), putBack = check.PutBack });
+                    await PushStateAsync();
+                }
+            }));
+        }
+        catch (Exception ex)
+        {
+            _service.Log("bad", "Display check failed: " + ex.Message);
+        }
+        finally
+        {
+            Volatile.Write(ref _checkingDisplays, 0);
+        }
+    }
+
+    private static string Plural(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 
     private async void RunTrayRescue()
     {
@@ -254,6 +304,11 @@ public sealed class MainWindow : ChassisWindow
             "windows.gatherAll" => _service.GatherAll(parameters),
             "windows.moveForegroundToCursor" => _service.MoveForegroundToCursor(),
             "windows.moveLastExternalToCursor" => _service.MoveLastExternalToCursor(),
+            "displays.setName" => _service.SetDisplayName(parameters),
+            "displays.forget" => _service.ForgetAway(parameters),
+            "displays.connect" => _service.OpenConnect(),
+            "displays.allowChanges" => _service.SetDdcAllowed(parameters),
+            "monitor.set" => _service.WriteMonitorSetting(parameters),
             _ => throw new InvalidOperationException("Unknown command: " + method)
         });
     }

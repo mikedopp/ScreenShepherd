@@ -10,6 +10,10 @@ public sealed class AppHostService
     private readonly WindowService _windows = new();
     private readonly GraphicsHealthService _graphics = new();
     private readonly BrowserUsageService _browsers = new();
+    private readonly MonitorControlService _ddc = new();
+    private readonly object _checkGate = new();
+    private DisplayWatch? _watch;
+    private bool _watchStarted;
     private readonly object _logGate = new();
     private readonly List<LogEntry> _logs = new();
     private nint _lastExternalForeground;
@@ -29,12 +33,19 @@ public sealed class AppHostService
     public AppSettings Settings { get; private set; } = new();
 
     public void UseSettings(AppSettings settings) => Settings = settings;
+
+    /// <summary>Opens the display history and names in the data folder. A snapshot run only reads them.</summary>
+    public void StartWatch(string folder, bool readOnly) => _watch = new DisplayWatch(folder, readOnly);
+    public DisplayWatch? Watch => _watch;
     public bool HotkeyRegistered { get; set; }
 
     public AppState GetState()
     {
         var monitors = _windows.GetMonitors();
         var windows = _windows.GetWindows();
+        var history = _watch?.GetHistory(Settings);
+        var away = _watch?.GetAway(Settings) ?? Array.Empty<AwayDisplay>();
+        monitors = Enrich(monitors, history);
         var graphics = _graphics.GetSnapshot(monitors);
         var browsers = _browsers.GetSnapshot();
         var checks = GetChecks(monitors, graphics);
@@ -53,7 +64,153 @@ public sealed class AppHostService
             Dependencies: new DependencyState(
                 checks.All(item => item.Level == "ok") ? "ready" : "review",
                 checks),
-            Logs: GetLogs());
+            Logs: GetLogs())
+        {
+            Away = away,
+            History = history
+        };
+    }
+
+    // Names, kinds, sessions and DDC/CI readings, added to what Windows reports.
+    private IReadOnlyList<MonitorSnapshot> Enrich(IReadOnlyList<MonitorSnapshot> monitors, DisplayHistory? history)
+    {
+        var ddc = _ddc.GetCached(monitors, Settings.ReadDdc);
+        return monitors.Select(m =>
+        {
+            var key = DisplayWatch.KeyOf(m);
+            var row = history?.Rows.FirstOrDefault(r => r.Key == key);
+            return m with
+            {
+                Key = key,
+                Label = _watch?.NameOf(key) ?? string.Empty,
+                Kind = _watch?.EffectiveKind(key, m.OutputTechnology) ?? (m.Wireless ? "miracast" : "wired"),
+                OnSince = _watch?.SessionStart(key) ?? row?.OnSince,
+                DropsToday = row?.Drops.Count ?? 0,
+                Ddc = ddc.GetValueOrDefault(m.DeviceName),
+                DdcAllowed = _watch?.DdcAllowed(key) ?? false
+            };
+        }).ToArray();
+    }
+
+    // ---------- displays that come and go ----------
+
+    /// <summary>
+    /// Runs every few seconds off the UI thread (and after a display change): remembers where windows are, and when the
+    /// set of displays changes, records what went and what came back and puts windows back on a display that returned.
+    /// </summary>
+    public DisplayCheck CheckDisplays(bool force = false)
+    {
+        if (_watch is null) return DisplayCheck.None;
+        lock (_checkGate)
+        {
+            var quick = _windows.GetMonitors(includeTelemetry: false);
+            var changed = _watch.Sample(quick, _windows.GetWindows());
+            if (!changed && !force && _watchStarted) return DisplayCheck.None;
+            var monitors = _windows.GetMonitors();
+            var change = _watch.Observe(monitors, _windows.GetWindows(), Settings);
+            _watchStarted = true;
+            var putBack = new List<PutBackResult>();
+            foreach (var gone in change.Gone)
+                Log("warn", $"{gone.Name} went away after {DisplayWatch.Span(gone.Minutes)}" + (gone.Windows > 0 ? $"; {Plural(gone.Windows, "window")} parked for its return." : "."));
+            foreach (var back in change.Back)
+            {
+                var moved = 0;
+                if (back.Parked is { Windows.Count: > 0 } && Settings.PutBack)
+                {
+                    if (Settings.PutBackDelaySeconds > 0) Thread.Sleep(TimeSpan.FromSeconds(Settings.PutBackDelaySeconds));
+                    moved = PutBack(back);
+                    _watch.PutBackDone(back.Key, moved);
+                    putBack.Add(new PutBackResult(back.Key, back.Name, back.GapMinutes, back.Parked.Windows.Count, moved));
+                }
+                Log("ok", $"{back.Name} " + (back.GapMinutes is { } gap ? $"came back after {DisplayWatch.Span(gap)}" : "turned on")
+                    + (moved > 0 ? $"; put {Plural(moved, "window")} back." : "."));
+            }
+            if (change.Gone.Count > 0 || change.Back.Count > 0) _ddc.Invalidate();
+            return new DisplayCheck(change.Gone, change.Back, putBack);
+        }
+    }
+
+    // A window goes back to the same spot on the returned display, unless it is gone, belongs to another process now,
+    // or was moved since Windows put it elsewhere (the user placed it; it stays).
+    private int PutBack(ReturnedDisplay back)
+    {
+        var moved = 0;
+        foreach (var parked in back.Parked!.Windows)
+        {
+            nint handle;
+            try { handle = WindowService.ParseHandle(parked.Handle); } catch (ArgumentException) { continue; }
+            var now = _windows.InspectWindow(handle);
+            if (now is null || !now.ProcessName.Equals(parked.ProcessName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (parked.Landed is { } landed && !Near(now.Bounds, landed)) continue;
+            var offset = new Point(parked.Bounds.X - back.Parked.Bounds.X, parked.Bounds.Y - back.Parked.Bounds.Y);
+            var target = new Point(back.Bounds.X + offset.X, back.Bounds.Y + offset.Y);
+            var result = parked.Maximized
+                ? _windows.MoveWindow(handle, back.DeviceName)
+                : _windows.MoveWindow(handle, back.DeviceName, 0, target);
+            if (result.Ok) moved++;
+        }
+        return moved;
+    }
+
+    internal static bool Near(RectSnapshot a, RectSnapshot b) =>
+        Math.Abs(a.X - b.X) <= 24 && Math.Abs(a.Y - b.Y) <= 24 && Math.Abs(a.Width - b.Width) <= 24 && Math.Abs(a.Height - b.Height) <= 24;
+
+    public void StopWatch() => _watch?.Stop();
+
+    public object SetDisplayName(JsonElement parameters)
+    {
+        var watch = _watch ?? throw new InvalidOperationException("The display watch is not running.");
+        var key = GetRequiredString(parameters, "key");
+        var name = GetString(parameters, "name", string.Empty);
+        var kind = GetString(parameters, "kind", string.Empty);
+        watch.SetName(key, name, kind);
+        Log("ok", name.Trim().Length > 0 ? $"Named a display \"{name.Trim()}\"." : "Cleared a display's name.");
+        return new { ok = true, message = "Saved." };
+    }
+
+    public object ForgetAway(JsonElement parameters)
+    {
+        (_watch ?? throw new InvalidOperationException("The display watch is not running.")).Forget(GetRequiredString(parameters, "key"));
+        Log("ok", "Forgot an away display's layout; its windows stay where they are.");
+        return new { ok = true, message = "Its windows stay where they are." };
+    }
+
+    public object OpenConnect()
+    {
+        Process.Start(new ProcessStartInfo("ms-settings-connectabledevices:devicediscovery") { UseShellExecute = true });
+        Log("ready", "Opened Windows' Connect pane.");
+        return new { ok = true, message = "Opened Windows' Connect pane." };
+    }
+
+    public object SetDdcAllowed(JsonElement parameters)
+    {
+        var allow = GetBoolean(parameters, "allow", false);
+        (_watch ?? throw new InvalidOperationException("The display watch is not running.")).SetDdcAllowed(GetRequiredString(parameters, "key"), allow);
+        Log("ok", allow ? "Allowed monitor setting changes for one display." : "Monitor setting changes turned off for one display.");
+        return new { ok = true, message = allow ? "Changes allowed for this monitor." : "This monitor is read-only again." };
+    }
+
+    /// <summary>Brightness, contrast or input over DDC/CI, only for a monitor the user allowed.</summary>
+    public object WriteMonitorSetting(JsonElement parameters)
+    {
+        var device = GetRequiredString(parameters, "deviceName");
+        var setting = GetRequiredString(parameters, "setting");
+        var value = (uint)Math.Max(0, GetNumber(parameters, "value", 0));
+        var monitor = _windows.GetMonitors().FirstOrDefault(m => m.DeviceName.Equals(device, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("That display is not active.");
+        var key = DisplayWatch.KeyOf(monitor);
+        if (_watch?.DdcAllowed(key) != true) throw new InvalidOperationException("Changes are off for this monitor. Turn on Allow changes on its Health card first.");
+        var code = setting switch
+        {
+            "brightness" => MonitorControlService.Brightness,
+            "contrast" => MonitorControlService.Contrast,
+            "input" => MonitorControlService.InputSource,
+            _ => throw new ArgumentException("Unknown monitor setting: " + setting)
+        };
+        var ok = _ddc.Write(monitor.Bounds, code, value);
+        var message = ok ? $"Sent {setting} {value} to {monitor.DisplayName}." : $"{monitor.DisplayName} didn't accept the change.";
+        Log(ok ? "ok" : "warn", message);
+        return new { ok, message };
     }
 
     public SettingsLaunchResult OpenSystemSettings(JsonElement parameters)
@@ -341,7 +498,18 @@ public sealed record AppState(
     AppSettings Settings,
     HotkeyState Hotkey,
     DependencyState Dependencies,
-    IReadOnlyList<LogEntry> Logs);
+    IReadOnlyList<LogEntry> Logs)
+{
+    public IReadOnlyList<AwayDisplay> Away { get; init; } = Array.Empty<AwayDisplay>();
+    public DisplayHistory? History { get; init; }
+}
+
+public sealed record PutBackResult(string Key, string Name, double? GapMinutes, int Parked, int Moved);
+
+public sealed record DisplayCheck(IReadOnlyList<GoneDisplay> Gone, IReadOnlyList<ReturnedDisplay> Back, IReadOnlyList<PutBackResult> PutBack)
+{
+    public static DisplayCheck None { get; } = new(Array.Empty<GoneDisplay>(), Array.Empty<ReturnedDisplay>(), Array.Empty<PutBackResult>());
+}
 
 /// <summary>
 /// The Windows parts Screen Shepherd reads or calls, and where each lives. One list feeds the Dependencies tab (through
@@ -350,7 +518,10 @@ public sealed record AppState(
 public static class WindowsParts
 {
     public const string DisplayConfig = "user32.dll: QueryDisplayConfig, DisplayConfigGetDeviceInfo, EnumDisplayMonitors";
-    public const string Edid = @"HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\<model>\<instance>\Device Parameters\EDID";
+    public const string Edid = @"HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\<model>\<instance>\Device Parameters\EDID; extension blocks from root\wmi WmiMonitorDescriptorMethods";
+    public const string Ddc = "dxva2.dll: GetPhysicalMonitorsFromHMONITOR, GetVCPFeatureAndVCPFeatureReply, SetVCPFeature, CapabilitiesRequestAndCapabilitiesReply (DDC/CI, MCCS codes 10, 12, 14, 60, C0, D6, DF)";
+    public const string Connect = "ms-settings-connectabledevices:devicediscovery (Windows' Connect pane, Win+K)";
+    public static string DataFile(string name) => Path.Combine(Path.GetDirectoryName(LegacySettings.NewFile(Program.AppName))!, name);
     public const string Placement = "user32.dll: EnumWindows, Get/SetWindowPlacement, SetWindowPos, ShowWindow, SetWinEventHook";
     public const string Dwm = "dwmapi.dll: DwmGetWindowAttribute (cloaked state, visible frame bounds)";
     public const string Hotkey = "user32.dll RegisterHotKey on the main window: Ctrl+Alt+Home";
@@ -372,6 +543,10 @@ public static class WindowsParts
         new("Performance data", "service", Performance, "Read only. Free memory and shared GPU memory."),
         new("Registry settings", "service", Registry, "Read only. Hardware GPU scheduling, Game DVR and the active power scheme."),
         new("UI Automation", "service", UiAutomation, "Read only. Counts open browser tabs when the browser exposes its tab strip."),
+        new("Monitor settings (DDC/CI)", "service", Ddc, "Reads each monitor's brightness, contrast, input, colour preset and hours on, at most once a minute. Changes only monitors you allow on their Health card."),
+        new("Connect pane", "service", Connect, "Opened by Connect, to cast to a wireless display or TV. Windows does the connecting."),
+        new("Display names and parked layouts", "file", DataFile("displays.json"), "Names and kinds you gave displays, which monitors may be changed, and where windows were on a display that went away."),
+        new("Display history", "file", DataFile("history.json"), "When each display came and went, kept 30 days. Screen Shepherd's own watch; nothing leaves this PC."),
         new("Settings shortcuts", "service", "ms-settings: pages (Advanced display, Graphics, Power, Windows Update)", "Opened in Windows Settings when you click Open settings on a Health check. Local pages, not the network."),
         new("Settings from 1.6 and older", "file", LegacySettings.LegacyFile, "Copied into the settings file above once, on the first run of 1.7. Never changed or deleted.")
     };

@@ -113,6 +113,81 @@ internal static class AppChecks
                && MonitorInventoryService.FormatConnection(16) == "USB or indirect display" && MonitorInventoryService.FormatConnection(17) == "Virtual display"
                && MonitorInventoryService.FormatConnection(18) == "DisplayPort over USB-C" && MonitorInventoryService.FormatConnection(5) == "HDMI",
                "connector types use Windows' numbering (15 is Miracast)");
-        c.That(WindowsParts.ForChassis().Count == 12, "every Windows part the app reads is on the Dependencies tab");
+        c.That(WindowsParts.ForChassis().Count == 16, "every Windows part the app reads is on the Dependencies tab");
+
+        // 1.8: displays that come and go, full EDID, DDC/CI.
+        c.That(defaults is { PutBack: true, PutBackDelaySeconds: 3, NotifyDrops: true, DropGapMinutes: 10, LayoutDays: 7, ReadDdc: true },
+            "put-back, drop notices and DDC/CI reads are on by default; a gap under 10 minutes is a drop");
+        var parsed = EdidDetails.Parse(SyntheticEdid(), "test");
+        c.That(parsed is { ExtensionBlocks: 1, MaxPixelClockMHz: 600, MinVerticalHz: 48, MaxVerticalHz: 144, HdmiMaxTmdsMHz: 300 } && Math.Abs(parsed.PreferredPixelClockMHz - 148.5) < 0.01,
+            "the EDID's range limits, preferred pixel clock and HDMI TMDS limit are read");
+        c.That(parsed.HdrTransfer.Contains("HDR10") && parsed.HdrMaxNits == 400 && parsed.HdrMaxAverageNits > 0, "the CTA-861 HDR block is read");
+        c.That(parsed.SrgbCoveragePercent >= 99 && parsed.DciP3CoveragePercent is > 70 and < 78, "an sRGB panel covers all of sRGB and about three quarters of DCI-P3");
+        c.That(Math.Abs(EdidDetails.Coverage(EdidDetails.Srgb, EdidDetails.Srgb) - 1) < 1e-9 && EdidDetails.Parse(new byte[10], "x") == EdidDetails.Empty,
+            "gamut coverage is exact for identical triangles, and a short EDID reads as empty");
+        c.That(MonitorControlService.ParseInputChoices("(prot(monitor)type(lcd)vcp(02 04 10 12 14(05 08 0B) 60(0F 11 12) D6(01 04)))").SequenceEqual(new[] { 0x0F, 0x11, 0x12 })
+               && MonitorControlService.ParseInputChoices("vcp(10 12)").Count == 0 && MonitorControlService.InputName(0x11) == "HDMI 1",
+            "a monitor's input list is read from its DDC/CI capabilities string");
+        c.That(DisplayWatch.Span(0.4) == "under a minute" && DisplayWatch.Span(7) == "7 min" && DisplayWatch.Span(123) == "2 h 03 m" && DisplayWatch.Span(1500) == "1 d 1 h",
+            "durations read as words");
+        c.That(AppHostService.Near(new RectSnapshot(0, 0, 800, 600), new RectSnapshot(20, -20, 810, 590)) && !AppHostService.Near(new RectSnapshot(0, 0, 800, 600), new RectSnapshot(100, 0, 800, 600)),
+            "a window within 24 pixels of where Windows put it counts as not moved since");
+        c.NoThrow(WatchRoundTrip, "a display that drops and returns is recorded as a drop, and its window is parked for the return");
+    }
+
+    private static void WatchRoundTrip()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "screenshepherd-watch-" + Environment.ProcessId);
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var settings = new AppSettings();
+            var a = TestMonitor(@"\\.\DISPLAY1", 0, "A1");
+            var b = TestMonitor(@"\\.\DISPLAY2", 1920, "B2");
+            var onB = new WindowSnapshot("0x10", 1, "player", "Film", new RectSnapshot(2000, 100, 800, 600), b.DeviceName, b.DisplayName, b.DeviceName, b.DisplayName, "visible", 100, false, false, true, false);
+            var landed = onB with { Bounds = new RectSnapshot(80, 100, 800, 600), MonitorDevice = a.DeviceName, NearestMonitorDevice = a.DeviceName };
+            var watch = new DisplayWatch(folder, readOnly: false);
+            watch.Observe(new[] { a, b }, new[] { onB }, settings);
+            if (watch.Sample(new[] { a, b }, new[] { onB })) throw new InvalidOperationException("an unchanged desk reported a change");
+            if (!watch.Sample(new[] { a }, new[] { landed })) throw new InvalidOperationException("a display going away was not noticed");
+            var gone = watch.Observe(new[] { a }, new[] { landed }, settings);
+            if (gone.Gone is not [{ Windows: 1 }]) throw new InvalidOperationException("the window on the display that went away was not parked");
+            if (watch.GetAway(settings) is not [{ Windows.Count: 1 }]) throw new InvalidOperationException("the away pen is missing");
+            var back = watch.Observe(new[] { a, b }, new[] { landed }, settings);
+            if (back.Back is not [{ Drop: true, Parked.Windows.Count: 1 }]) throw new InvalidOperationException("the return was not a drop with a parked layout");
+            watch.PutBackDone(back.Back[0].Key, 1);
+            if (watch.GetHistory(settings).DropsToday != 1 || watch.GetAway(settings).Count != 0) throw new InvalidOperationException("the history or away list is wrong");
+            if (new DisplayWatch(folder, readOnly: true).GetHistory(settings).Events.Count != 2) throw new InvalidOperationException("history.json did not round-trip");
+        }
+        finally
+        {
+            try { Directory.Delete(folder, true); } catch (IOException) { }
+        }
+    }
+
+    private static MonitorSnapshot TestMonitor(string device, int x, string serial) =>
+        new MonitorSnapshot(1, device, device, x == 0, new RectSnapshot(x, 0, 1920, 1080), new RectSnapshot(x, 0, 1920, 1040), 32,
+            "Test", "TST", "Panel " + serial, serial, "0001", "HDMI", 1, true, true, 53, 30, 1, 2024, 1920, 1080, 60, false, false, 8,
+            Array.Empty<string>(), "Healthy", "ok", Array.Empty<string>(), false) { IdentityKey = "TST|0001|" + serial };
+
+    // A 1080p sRGB monitor with a range-limits descriptor, an HDMI block (300 MHz TMDS) and an HDR10 block.
+    private static byte[] SyntheticEdid()
+    {
+        var e = new byte[256];
+        new byte[] { 0, 255, 255, 255, 255, 255, 255, 0 }.CopyTo(e, 0);
+        e[54] = 0x02; e[55] = 0x3A;                                          // 148.50 MHz preferred mode
+        new byte[] { 0, 0, 0, 0xFD, 0, 48, 144, 30, 160, 60 }.CopyTo(e, 72); // 48-144 Hz, 600 MHz
+        void Primary(int high, int low, int shift, double value)
+        {
+            var v = (int)Math.Round(value * 1024);
+            e[high] = (byte)(v >> 2);
+            e[low] |= (byte)((v & 3) << shift);
+        }
+        Primary(27, 25, 6, 0.640); Primary(28, 25, 4, 0.330);
+        Primary(29, 25, 2, 0.300); Primary(30, 25, 0, 0.600);
+        Primary(31, 26, 6, 0.150); Primary(32, 26, 4, 0.060);
+        e[126] = 1;
+        new byte[] { 0x02, 0x03, 19, 0, 0x67, 0x03, 0x0C, 0x00, 0x10, 0x00, 0x00, 60, 0xE6, 0x06, 0x05, 0x01, 96, 82, 40 }.CopyTo(e, 128);
+        return e;
     }
 }
